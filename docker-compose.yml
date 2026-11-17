@@ -1,0 +1,70 @@
+x-api-env: &api-env
+  DATABASE_URL: postgresql://${POSTGRES_USER:-micromob}:${POSTGRES_PASSWORD:-micromob}@postgres:5432/${POSTGRES_DB:-micromob}
+  RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+  JWT_SECRET: ${JWT_SECRET:-troque-este-segredo-por-um-valor-longo}
+  NTFY_BASE_URL: ${NTFY_BASE_URL:-https://ntfy.sh}
+  NTFY_TOPIC: ${NTFY_TOPIC:-micromob-alertas-CHANGE-ME}
+  NTFY_TOKEN: ${NTFY_TOKEN:-}
+  PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+  GEOFENCE_LAT: ${GEOFENCE_LAT:--22.3147}
+  GEOFENCE_LNG: ${GEOFENCE_LNG:--49.0608}
+  GEOFENCE_RADIUS_KM: ${GEOFENCE_RADIUS_KM:-5}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-micromob}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-micromob}
+      POSTGRES_DB: ${POSTGRES_DB:-micromob}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-micromob}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "15672:15672" # painel de gerenciamento (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  ntfy:
+    image: binwiederhier/ntfy:latest
+    command: serve
+    profiles: ["selfhosted"]
+    ports:
+      - "8081:80"
+
+  api:
+    build: ./backend
+    environment: *api-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    ports:
+      - "3000:3000"
+
+  simulator:
+    build: ./backend
+    command: ["node", "dist/simulator.js"]
+    environment: *api-env
+    depends_on:
+      rabbitmq: { condition: service_healthy }
+      api: { condition: service_started }
+
+  web:
+    build: ./frontend
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
